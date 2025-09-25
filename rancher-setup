@@ -1,0 +1,61 @@
+#! /bin/bash
+
+if [ $# -eq 0 ]; then
+    >&2 echo "No arguments provided\nCorrect usage:\n ./setup.sh FQDN_NAME"
+    exit 1
+fi
+
+echo "Downloading K3s..."
+curl -sfL https://get.k3s.io | INSTALL_K3S_CHANNEL="v1.27" K3S_KUBECONFIG_MODE="644" sh -
+
+echo "Sleeping 30s"
+sleep 30s
+
+echo -e "List all nodes: \n $(kubectl get nodes)"
+
+echo "[+] Installing Helm..."
+curl https://raw.githubusercontent.com/helm/helm/master/scripts/get-helm-3 | bash
+echo "DONE" 
+sleep 5s
+
+echo -e "Helm Version: $(helm version --client)"
+
+echo -e "$(mkdir -p ~/.kube)"
+sleep 5s
+echo -e "$(ln -s /etc/rancher/k3s/k3s.yaml ~/.kube/config)"
+sleep 5s
+
+#Confirm help is working
+echo -e "Helm charts: \n $(helm ls --all-namespaces)" || echo "FAILED"
+sleep 5s
+
+#Install Cert-manager
+echo "[+] Downloading Cert-manager..."
+kubectl apply --validate=false -f https://github.com/jetstack/cert-manager/releases/download/v1.11.5/cert-manager.crds.yaml
+sleep 5s 
+
+echo "[+] Add helm repo for JetStack..."
+helm repo add jetstack https://charts.jetstack.io && echo -e "$(helm repo list)"
+echo -e "$(helm repo list)"
+sleep 5s
+
+echo "[+] Installing Cert-manager..."
+helm install cert-manager jetstack/cert-manager --namespace cert-manager --version v1.11.5 --create-namespace
+
+echo "Sleeping 30s"
+sleep 30s
+
+echo "[+] $(kubectl -n cert-manager rollout status deploy/cert-manager)"
+sleep 5s
+echo "[+] $(kubectl -n cert-manager rollout status deploy/cert-manager-webhook)"
+sleep 5s
+
+echo "[+] Adding rancher repo..."
+helm repo add rancher-stable https://releases.rancher.com/server-charts/stable
+sleep 5s
+
+echo "[+] Installing Rancher..."
+helm install rancher rancher-stable/rancher --namespace cattle-system --set hostname=$1 --set replicas=1 --set bootstrapPassword=RancherOnK3s --create-namespace
+
+sleep 30s
+echo "[+] $(kubectl -n cattle-system rollout status deployment/rancher)"
