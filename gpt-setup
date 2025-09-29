@@ -1,0 +1,84 @@
+#!/bin/bash
+set -euo pipefail
+
+# -------------------
+# CONFIGURATION
+# -------------------
+RANCHER_HOSTNAME="rancher.local"       # Use IP or local DNS name
+RANCHER_REPLICAS=3
+EMAIL="admin@example.com"              # only used if switching to Let's Encrypt later
+
+# -------------------
+# 1. Install K3s (HA)
+# -------------------
+# NOTE: For HA you need multiple servers with a shared datastore.
+# Example with embedded etcd (default since K3s v1.19+).
+# Run this on each control-plane node.
+
+if ! command -v k3s &>/dev/null; then
+  curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="server --cluster-init" sh -
+fi
+
+# On 2nd/3rd server nodes, join with:
+# curl -sfL https://get.k3s.io | K3S_URL="https://<first-node-ip>:6443" K3S_TOKEN="<cat /var/lib/rancher/k3s/server/node-token>" sh -
+
+# On worker nodes, join with the same command but replace INSTALL_K3S_EXEC with "agent"
+
+# kubeconfig setup
+mkdir -p ~/.kube
+sudo cp /etc/rancher/k3s/k3s.yaml ~/.kube/config
+sudo chown $(id -u):$(id -g) ~/.kube/config
+
+# -------------------
+# 2. Install Helm
+# -------------------
+if ! command -v helm &>/dev/null; then
+  curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+fi
+
+# -------------------
+# 3. Install cert-manager
+# -------------------
+helm repo add jetstack https://charts.jetstack.io
+helm repo update
+
+kubectl create namespace cert-manager || true
+
+helm upgrade --install cert-manager jetstack/cert-manager \
+  --namespace cert-manager \
+  --set installCRDs=true
+
+kubectl -n cert-manager rollout status deploy/cert-manager --timeout=180s
+
+# -------------------
+# 4. Install ingress-nginx
+# -------------------
+helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+helm repo update
+
+kubectl create namespace ingress-nginx || true
+
+helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx \
+  --namespace ingress-nginx
+
+kubectl -n ingress-nginx rollout status deploy/ingress-nginx-controller --timeout=180s
+
+# -------------------
+# 5. Install Rancher with self-signed certs
+# -------------------
+helm repo add rancher-latest https://releases.rancher.com/server-charts/latest
+helm repo update
+
+kubectl create namespace cattle-system || true
+
+helm upgrade --install rancher rancher-latest/rancher \
+  --namespace cattle-system \
+  --set hostname=${RANCHER_HOSTNAME} \
+  --set replicas=${RANCHER_REPLICAS} \
+  --set ingress.tls.source=rancher
+
+echo "-----------------------------------------------------"
+echo "Rancher installation initiated."
+echo "Access Rancher at: https://${RANCHER_HOSTNAME}"
+echo "NOTE: You'll see a self-signed cert warning in browser."
+echo "-----------------------------------------------------"
