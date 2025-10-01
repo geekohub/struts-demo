@@ -16,7 +16,7 @@ EMAIL="admin@example.com"              # only used if switching to Let's Encrypt
 # Run this on each control-plane node.
 
 if ! command -v k3s &>/dev/null; then
-  curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="server --cluster-init" sh -
+  curl -sfL https://get.k3s.io | INSTALL_K3S_CHANNEL="v1.31" K3S_KUBECONFIG_MODE="644" INSTALL_K3S_EXEC="server --cluster-init" sh -
 fi
 
 # On 2nd/3rd server nodes, join with:
@@ -39,43 +39,47 @@ fi
 # -------------------
 # 3. Install cert-manager
 # -------------------
+kubectl apply --validate=false -f https://github.com/jetstack/cert-manager/releases/download/v1.17.2/cert-manager.crds.yaml
+
 helm repo add jetstack https://charts.jetstack.io
 helm repo update
 
-kubectl create namespace cert-manager || true
 
-helm upgrade --install cert-manager jetstack/cert-manager \
+helm install cert-manager jetstack/cert-manager \
   --namespace cert-manager \
-  --set installCRDs=true
+  --version v1.17.2 \
+  --set installCRDs=true \
+  --create-namespace
 
 kubectl -n cert-manager rollout status deploy/cert-manager --timeout=180s
 
 # -------------------
 # 4. Install ingress-nginx
 # -------------------
-helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
-helm repo update
+#helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+#helm repo update
 
-kubectl create namespace ingress-nginx || true
+#kubectl create namespace ingress-nginx || true
 
-helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx \
-  --namespace ingress-nginx
+#helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx \
+#  --namespace ingress-nginx
 
-kubectl -n ingress-nginx rollout status deploy/ingress-nginx-controller --timeout=180s
+#kubectl -n ingress-nginx rollout status deploy/ingress-nginx-controller --timeout=180s
 
 # -------------------
 # 5. Install Rancher with self-signed certs
 # -------------------
-helm repo add rancher-latest https://releases.rancher.com/server-charts/latest
+helm repo add rancher-stable https://releases.rancher.com/server-charts/stable
 helm repo update
 
 kubectl create namespace cattle-system || true
 
-helm upgrade --install rancher rancher-latest/rancher \
+helm upgrade --install rancher rancher-stable/rancher \
   --namespace cattle-system \
   --set hostname=${RANCHER_HOSTNAME} \
   --set replicas=${RANCHER_REPLICAS} \
   --set ingress.tls.source=rancher
+
 
 echo "-----------------------------------------------------"
 echo "Rancher installation initiated."
